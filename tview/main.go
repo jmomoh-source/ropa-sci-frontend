@@ -23,6 +23,7 @@ var states = []string{"AB", "AD", "AK", "AN", "BA", "BY", "BE", "BO", "CR",
 	"KE", "KO", "KW", "LA", "NA", "NI", "OG", "ON", "OS", "OY", "PL", "RI", "SO", "TA", "YO", "ZA",
 }
 
+// ------Contac
 type Contact struct {
 	FirstName   string `json:"first_name"`
 	LastName    string `json:"last_name"`
