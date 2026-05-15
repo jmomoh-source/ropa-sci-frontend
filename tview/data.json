@@ -1,0 +1,42 @@
+[
+ {
+  "first_name": "ore",
+  "last_name": "ore",
+  "UserName": "ore",
+  "email": "ore",
+  "phone_number": "09876543",
+  "gender": "female",
+  "state": "AB",
+  "Password": "$2a$10$w/OkYSCjjsKGZoS.gG9JSudGZ72BjrvBDXF3D9A9YEPpXL8VnkkNa"
+ },
+ {
+  "first_name": "ahmed",
+  "last_name": "toyyib",
+  "UserName": "oredunni",
+  "email": "ahmedtoyyib@gmail.com",
+  "phone_number": "08135868921",
+  "gender": "Male",
+  "state": "KW",
+  "Password": "$2a$10$VGtP2wMTSGGSLXLP6eMvPexv35SpH0C8NSs1E/EAvJdgOKzewXJ.e"
+ },
+ {
+  "first_name": "admin",
+  "last_name": "admin",
+  "UserName": "admin",
+  "email": "admin",
+  "phone_number": "098765432",
+  "gender": "Female",
+  "state": "AB",
+  "Password": "$2a$10$gn7zp1xttI4TPhAkXSyb4eRqp/GXYhqMDWh2YOjkh0/RMNsv/tJdO"
+ },
+ {
+  "first_name": "toyyib",
+  "last_name": "ahmed",
+  "UserName": "toahmed",
+  "email": "Oredunni@gmail.com",
+  "phone_number": "098765432346789",
+  "gender": "Male",
+  "state": "KW",
+  "Password": "$2a$10$GIf7xEp3DKIrwY56aKSPJuowjI3mYoNTxIhvb/mu4.X7IUv/5SCSC"
+ }
+]
