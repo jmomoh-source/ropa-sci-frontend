@@ -124,6 +124,12 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
+	// Bubbletea sends a tea.WindowSizeMsg automatically whenever the terminal is resized
+	case tea.WindowSizeMsg:
+		m.state.TermWidth = msg.Width
+		m.state.TermHeight = msg.Height
+		return m, nil
+
 	// ── Spinner tick — advances the animation frame during AI think phase ──
 	case spinnerTickMsg:
 		m.state.SpinnerFrame = (m.state.SpinnerFrame + 1) % len(spinnerFrames)
@@ -144,15 +150,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Show result — update score and transition to result phase ──
 	case showResultMsg:
-		m.state.Phase = "result"
-		switch m.state.RoundOutcome {
-		case "win":
-			m.state.Score.PlayerWins++
-		case "lose":
-			m.state.Score.OpponentWins++
-		}
-		m.state.Score.Round++
-		return m, nil
+    m.state.Phase = "result"
+    switch m.state.RoundOutcome {
+    case "win":
+        m.state.Score.PlayerWins++
+    case "lose":
+        m.state.Score.OpponentWins++
+    }
+    m.state.Score.Round++
+
+    // Check if match is over and update lifetime stats
+    if m.state.Score.PlayerWins == 2 || m.state.Score.OpponentWins == 2 {
+        m.state.Player.TotalMatches++
+        if m.state.Score.PlayerWins == 2 {
+            m.state.Player.Wins++
+        } else {
+            m.state.Player.Losses++
+        }
+        // Save updated stats to disk — ignore error silently in UI
+        // player will still see correct stats this session
+        _ = models.UpdatePlayer(m.state.Player)
+    }
+    return m, nil
 
 	// ── Mouse clicks — coordinate mapping wired in Week 7 polish phase ──
 	case tea.MouseMsg:
@@ -286,41 +305,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				switch m.state.ActiveField {
 
-				case 0: // First Name — single word, title-cased on save
+				case 0: // First Name
 					if len(strings.Fields(input)) != 1 {
 						m.state.FormError = "First name must be a single word"
 						return m, nil
 					}
-					m.state.Player.FirstName = caser.String(input)
+					m.state.Player.FirstName = caser.String(strings.ToLower(input)) // normalise then capitalise
 					m.state.ActiveField++
 					m.state.InputBuffer = ""
 					m.state.FormError = ""
 
-				case 1: // Last Name — single word, title-cased on save
+				case 1: // Last Name
 					if len(strings.Fields(input)) != 1 {
 						m.state.FormError = "Last name must be a single word"
 						return m, nil
 					}
-					m.state.Player.LastName = caser.String(input)
+					m.state.Player.LastName = caser.String(strings.ToLower(input)) // normalise then capitalise
 					m.state.ActiveField++
 					m.state.InputBuffer = ""
 					m.state.FormError = ""
 
-				case 2: // Username — single word, checked against existing players
+				case 2: // Username
 					if len(strings.Fields(input)) != 1 {
 						m.state.FormError = "Username must be a single word — no spaces"
 						return m, nil
 					}
-					if models.UsernameExists(input) {
+					if models.UsernameExists(strings.ToLower(input)) {
 						m.state.FormError = "Username already taken — try signing in instead"
 						return m, nil
 					}
-					m.state.Player.Username = input
+					m.state.Player.Username = strings.ToLower(input) // always stored lowercase
 					m.state.ActiveField++
 					m.state.InputBuffer = ""
 					m.state.FormError = ""
 
-				case 3: // State — validated against Nigerian states list, abbreviations accepted
+				case 3: // State — FindState handles any casing
 					state, found := models.FindState(input)
 					if !found {
 						m.state.FormError = "State not recognised — try 'Lagos' or 'LA'"
@@ -332,15 +351,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state.InputBuffer = ""
 					m.state.FormError = ""
 
-				case 4: // Email — optional, press Enter to skip
+				case 4: // Email
 					if input != "" {
 						atIndex := strings.Index(input, "@")
 						if atIndex < 1 || !strings.Contains(input[atIndex:], ".") {
 							m.state.FormError = "Invalid email — or just press Enter to skip"
 							return m, nil
 						}
-						// Copy before taking address — avoids dangling pointer on function return
-						emailCopy := input
+						emailCopy := strings.ToLower(input) // normalise on save
 						m.state.Player.Email = &emailCopy
 					}
 					m.state.Player.Role = "player"
@@ -357,7 +375,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// ── Login — look up username and load player data ──
 			case "login":
-				player, found, err := models.FindPlayerByUsername(m.state.InputBuffer)
+				player, found, err := models.FindPlayerByUsername(strings.ToLower(m.state.InputBuffer))
 				if err != nil {
 					m.state.FormError = "Error reading player data — please try again"
 				} else if !found {
@@ -424,12 +442,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Default — capture printable characters on form screens
 		default:
 			if len(msg.String()) == 1 {
+				char := msg.String()
+
 				if m.state.Screen == "login" {
-					m.state.InputBuffer += strings.ToLower(msg.String())
+					m.state.InputBuffer += char
 				}
+
 				if m.state.Screen == "register" {
-					m.state.InputBuffer += strings.ToLower(msg.String())
-					// Live state suggestions update on every keystroke in field 3
+					m.state.InputBuffer += char
 					if m.state.ActiveField == 3 {
 						m.state.StateSuggestions = models.SuggestStates(m.state.InputBuffer)
 					}
@@ -463,6 +483,21 @@ func menuLength(screen string) int {
 
 // View renders the current screen as a string — called automatically on every state change
 func (m model) View() string {
+	// Global guard — terminal too narrow to render safely
+	if m.state.TermWidth > 0 && m.state.TermWidth < 50 {
+		return fmt.Sprintf(
+			"\n  ⚠  Terminal too narrow!\n\n"+
+				"  Please resize to at least 50 columns.\n"+
+				"  Current width: %d columns.",
+			m.state.TermWidth,
+		)
+	}
+	// Too short vertically
+	if m.state.TermHeight > 0 && m.state.TermHeight < 16 {
+		return "\n  ⚠  Terminal too short!\n\n" +
+			"  Please resize to at least 16 rows."
+	}
+
 	switch m.state.Screen {
 	case "welcome":
 		return renderWelcome(m)
@@ -483,6 +518,22 @@ func (m model) View() string {
 
 // ─── Screen Renderers ─────────────────────────────────────────────────────────
 
+// banner returns the full ASCII logo on wide terminals
+// and a compact text version on narrow terminals
+func banner(termWidth int) string {
+	if termWidth >= 70 {
+		return `
+  ██████╗  ██████╗ ██████╗  █████╗       ███████╗ ██████╗██╗
+  ██╔══██╗██╔═══██╗██╔══██╗██╔══██╗      ██╔════╝██╔════╝██║
+  ██████╔╝██║   ██║██████╔╝███████║█████╗███████╗██║     ██║
+  ██╔══██╗██║   ██║██╔═══╝ ██╔══██║╚════╝╚════██║██║     ██║
+  ██║  ██║╚██████╔╝██║     ██║  ██║      ███████║╚██████╗██║
+  ╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝      ╚══════╝ ╚═════╝╚═╝
+`
+	}
+	return "\n  ROPA-SCI\n"
+}
+
 // renderWelcome draws the landing screen with register/login/quit options
 func renderWelcome(m model) string {
 	options := []string{
@@ -490,15 +541,8 @@ func renderWelcome(m model) string {
 		"Sign In  — I have an account",
 		"Quit",
 	}
-	s := `
-  ██████╗  ██████╗ ██████╗  █████╗       ███████╗ ██████╗██╗
-  ██╔══██╗██╔═══██╗██╔══██╗██╔══██╗      ██╔════╝██╔════╝██║
-  ██████╔╝██║   ██║██████╔╝███████║█████╗███████╗██║     ██║
-  ██╔══██╗██║   ██║██╔═══╝ ██╔══██║╚════╝╚════██║██║     ██║
-  ██║  ██║╚██████╔╝██║     ██║  ██║      ███████║╚██████╗██║
-  ╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝      ╚══════╝ ╚═════╝╚═╝
-
-`
+	s := banner(m.state.TermWidth) // ← replaces the hardcoded ASCII block
+	s += "\n"
 	for i, opt := range options {
 		cursor := "  "
 		if m.state.Cursor == i {
@@ -540,30 +584,19 @@ func renderRegister(m model) string {
 		m.state.Player.State,
 		emailDisplay(m.state.Player.Email),
 	}
-	s := `
-  ██████╗  ██████╗ ██████╗  █████╗       ███████╗ ██████╗██╗
-  ██╔══██╗██╔═══██╗██╔══██╗██╔══██╗      ██╔════╝██╔════╝██║
-  ██████╔╝██║   ██║██████╔╝███████║█████╗███████╗██║     ██║
-  ██╔══██╗██║   ██║██╔═══╝ ██╔══██║╚════╝╚════██║██║     ██║
-  ██║  ██║╚██████╔╝██║     ██║  ██║      ███████║╚██████╗██║
-  ╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝      ╚══════╝ ╚═════╝╚═╝
+	s := banner(m.state.TermWidth) // ← replaces the hardcoded ASCII block
+	s += "\n  REGISTER — Create your account\n\n"
 
-  REGISTER — Create your account
-
-`
+	// rest of the function is unchanged from here down
 	for i, field := range fields {
 		if i == m.state.ActiveField {
-			// Active field shows the live input buffer with a blinking cursor
 			s += "  > " + field + ": " + m.state.InputBuffer + "_\n"
 		} else if values[i] != "" {
-			// Completed fields show their saved value with a checkmark
 			s += "    " + field + ": " + values[i] + " ✓\n"
 		} else {
-			// Future fields remain blank until reached
 			s += "    " + field + ": \n"
 		}
 	}
-	// Live state suggestions appear below the state field as the user types
 	if m.state.ActiveField == 3 && len(m.state.StateSuggestions) > 0 {
 		s += "\n  Suggestions: "
 		for _, state := range m.state.StateSuggestions {
@@ -613,42 +646,46 @@ func renderMenu(m model) string {
 // MoveCard returns a 6-line ASCII art card for a given move
 // The card border doubles when selected to give clear visual feedback
 func MoveCard(move models.Move, selected bool) []string {
-	border := "─────────"
+	b := "─────────────"
 	if selected {
-		border = "═════════"
+		b = "═════════════"
 	}
+
+	top := "┌" + b + "┐"
+	bot := "└" + b + "┘"
+
 	cards := map[models.Move][]string{
 		models.Rock: {
-			"┌" + border + "┐",
-			"│    🪨    │",
-			"│          │",
-			"│   ROCK   │",
-			"│  [1/R]   │",
-			"└" + border + "┘",
+			"       🪨       ", // emoji sits outside the box — no alignment issue
+			top,
+			"│             │",
+			"│    R O C K  │",
+			"│   [ 1 / R ] │",
+			bot,
 		},
 		models.Paper: {
-			"┌" + border + "┐",
-			"│    📄    │",
-			"│          │",
-			"│  PAPER   │",
-			"│  [2/P]   │",
-			"└" + border + "┘",
+			"       📄       ",
+			top,
+			"│             │",
+			"│   P A P E R │",
+			"│   [ 2 / P ] │",
+			bot,
 		},
 		models.Scissors: {
-			"┌" + border + "┐",
-			"│    ✂️    │",
-			"│          │",
-			"│ SCISSORS │",
-			"│  [3/S]   │",
-			"└" + border + "┘",
+			"       ✂️       ",
+			top,
+			"│             │",
+			"│  S C I S S  │",
+			"│   [ 3 / S ] │",
+			bot,
 		},
 		models.None: {
-			"┌─────────┐",
-			"│   ???   │",
-			"│         │",
-			"│ ▓▓▓▓▓▓▓ │",
-			"│ ▓▓▓▓▓▓▓ │",
-			"└─────────┘",
+			"               ",
+			top,
+			"│   ? ? ? ? ? │",
+			"│   ▓ ▓ ▓ ▓ ▓ │",
+			"│   ? ? ? ? ? │",
+			bot,
 		},
 	}
 	return cards[move]
@@ -664,14 +701,73 @@ func renderGame(m model) string {
 	)
 	switch m.state.Phase {
 	case "pick":
-		s += renderPick(m)
+		// Wide terminal — cards side by side
+		if m.state.TermWidth >= 60 {
+			s += renderPick(m)
+		} else {
+			// Narrow terminal — cards stacked vertically
+			s += renderPickNarrow(m)
+		}
 	case "think":
-		s += renderThink(m)
+		if m.state.TermWidth >= 60 {
+			s += renderThink(m)
+		} else {
+			s += renderThinkNarrow(m)
+		}
 	case "reveal":
-		s += renderReveal(m)
+		if m.state.TermWidth >= 60 {
+			s += renderReveal(m)
+		} else {
+			s += renderRevealNarrow(m)
+		}
 	case "result":
 		s += renderResult(m)
 	}
+	return s
+}
+
+// renderPickNarrow shows cards stacked vertically for narrow terminals
+func renderPickNarrow(m model) string {
+	moves := []models.Move{models.Rock, models.Paper, models.Scissors}
+	labels := []string{"[1/R]", "[2/P]", "[3/S]"}
+	s := "  Choose your move:\n\n"
+	for i, move := range moves {
+		selected := m.state.Cursor == i
+		prefix := "  "
+		if selected {
+			prefix = "> "
+		}
+		name := string(move)
+		if selected {
+			s += "  " + prefix + "[ " + strings.ToUpper(name) + " " + labels[i] + " ] ◀\n"
+		} else {
+			s += "  " + prefix + "[ " + strings.ToUpper(name) + " " + labels[i] + " ]\n"
+		}
+	}
+	s += "\n  ↑/↓ to choose · Enter or 1/2/3 to confirm\n"
+	s += "  Esc to return to menu\n"
+	return s
+}
+
+// renderThinkNarrow shows think phase for narrow terminals
+func renderThinkNarrow(m model) string {
+	spinner := spinnerFrames[m.state.SpinnerFrame]
+	s := "  YOUR MOVE\n\n"
+	s += "  [ " + strings.ToUpper(string(m.state.PlayerMove)) + " ]\n\n"
+	s += "        VS\n\n"
+	s += "  AI's MOVE\n\n"
+	s += "  [  ???  ]\n\n"
+	s += "  " + spinner + "  AI is calculating...\n"
+	return s
+}
+
+// renderRevealNarrow shows both moves stacked for narrow terminals
+func renderRevealNarrow(m model) string {
+	s := "  YOUR MOVE\n\n"
+	s += "  [ " + strings.ToUpper(string(m.state.PlayerMove)) + " ]\n\n"
+	s += "        VS\n\n"
+	s += "  AI's MOVE\n\n"
+	s += "  [ " + strings.ToUpper(string(m.state.AIMove)) + " ]\n\n"
 	return s
 }
 
@@ -726,34 +822,37 @@ func renderResult(m model) string {
 	s := ""
 	switch m.state.RoundOutcome {
 	case "win":
+		s += "  🏆  YOU WIN THIS ROUND!  🏆\n"
 		s += "  ╔═══════════════════════════════╗\n"
-		s += "  ║   🏆  YOU WIN THIS ROUND!  🏆║\n"
 		s += "  ║                               ║\n"
 		s += "  ║  " + padCenter(outcomeMessage(m.state.PlayerMove, m.state.AIMove), 29) + "  ║\n"
+		s += "  ║                               ║\n"
 		s += "  ╚═══════════════════════════════╝\n"
 	case "lose":
+		s += "  💀  AI WINS THIS ROUND...  💀\n"
 		s += "  ╔═══════════════════════════════╗\n"
-		s += "  ║      💀  AI WINS...  💀      ║\n"
 		s += "  ║                               ║\n"
 		s += "  ║  " + padCenter(outcomeMessage(m.state.PlayerMove, m.state.AIMove), 29) + "  ║\n"
+		s += "  ║                               ║\n"
 		s += "  ╚═══════════════════════════════╝\n"
 	case "tie":
+		s += "  🤝  DRAW!  🤝\n"
 		s += "  ╔═══════════════════════════════╗\n"
-		s += "  ║       🤝  DRAW!  🤝          ║\n"
 		s += "  ║                               ║\n"
 		s += "  ║  " + padCenter(outcomeMessage(m.state.PlayerMove, m.state.AIMove), 29) + "  ║\n"
+		s += "  ║                               ║\n"
 		s += "  ╚═══════════════════════════════╝\n"
 	}
+
 	s += "\n  " + scoreBar(m.state.Score.PlayerWins, m.state.Score.OpponentWins) + "\n"
-	// Check for match completion
+
 	if m.state.Score.PlayerWins == 2 {
-		s += "\n  🎉🎉  YOU WIN THE MATCH!  🎉🎉\n"
+		s += "\n  🎉  YOU WIN THE MATCH!  🎉\n"
 		s += "\n  Enter to play again · Esc for menu\n"
 	} else if m.state.Score.OpponentWins == 2 {
 		s += "\n  💀  AI wins the match. Better luck next time.\n"
 		s += "\n  Enter to play again · Esc for menu\n"
 	} else {
-		// Match still in progress — contextual prompt per outcome
 		switch m.state.RoundOutcome {
 		case "win":
 			s += "\n  Enter for next round · Esc for menu\n"

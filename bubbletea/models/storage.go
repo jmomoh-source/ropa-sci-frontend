@@ -79,3 +79,32 @@ func FindPlayerByUsername(username string) (Player, bool, error) {
     }
     return Player{}, false, nil
 }
+
+// UpdatePlayer finds an existing player by username and overwrites their record
+// Used to save lifetime stats after every match ends
+func UpdatePlayer(p Player) error {
+    players, err := LoadPlayers()
+    if err != nil {
+        return fmt.Errorf("could not load players: %w", err)
+    }
+
+    found := false
+    for i, existing := range players {
+        if strings.EqualFold(existing.Username, p.Username) {
+            players[i] = p // overwrite with updated data
+            found = true
+            break
+        }
+    }
+
+    if !found {
+        return fmt.Errorf("player '%s' not found", p.Username)
+    }
+
+    data, err := json.MarshalIndent(players, "", "  ")
+    if err != nil {
+        return err
+    }
+
+    return os.WriteFile(dataFile, data, 0644)
+}

@@ -66,6 +66,10 @@ type GameState struct {
 	FormError        string
 	InputBuffer      string
 	StateSuggestions []State
+
+	// Terminal dimensions — updated on every resize event
+	TermWidth	int
+	TermHeight	int
 }
 
 // GamePhase tracks where we are within the game screen

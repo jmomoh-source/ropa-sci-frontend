@@ -1,26 +1,14 @@
 [
   {
-    "FirstName": "Jezreal",
+    "FirstName": "Jezeal",
     "LastName": "Momoh",
-    "Username": "Jmomoh",
+    "Username": "jmomoh",
     "State": "Edo",
-    "Email": "Jezreal41@gmail.com",
+    "Email": "jezreal4@gmail.com",
     "Role": "player",
-    "Wins": 0,
-    "Losses": 0,
+    "Wins": 2,
+    "Losses": 1,
     "Ties": 0,
-    "TotalMatches": 0
-  },
-  {
-    "FirstName": "Acfnow",
-    "LastName": "Now",
-    "Username": "ee",
-    "State": "Abia",
-    "Email": "ademicea@gmai.com",
-    "Role": "player",
-    "Wins": 0,
-    "Losses": 0,
-    "Ties": 0,
-    "TotalMatches": 0
+    "TotalMatches": 3
   }
 ]
