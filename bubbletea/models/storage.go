@@ -5,6 +5,7 @@ import (
     "fmt"
     "os"
     "strings"
+    "math/rand"
 )
 
 const dataFile = "data/players.json"
@@ -107,4 +108,10 @@ func UpdatePlayer(p Player) error {
     }
 
     return os.WriteFile(dataFile, data, 0644)
+}
+
+// GenerateRoomCode creates a random 4-digit room code
+func GenerateRoomCode() string {
+    digits := rand.Intn(9000) + 1000 // always 4 digits: 1000-9999
+    return fmt.Sprintf("RPS-%d", digits)
 }

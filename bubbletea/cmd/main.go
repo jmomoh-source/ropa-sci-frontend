@@ -133,8 +133,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Spinner tick — advances the animation frame during AI think phase ──
 	case spinnerTickMsg:
 		m.state.SpinnerFrame = (m.state.SpinnerFrame + 1) % len(spinnerFrames)
-		if m.state.Phase == "think" {
-			return m, spinnerTick() // keep ticking until AI decides
+		if m.state.Phase == "think" ||
+			m.state.Screen == "create-room" ||
+			m.state.Screen == "quick-match" {
+			return m, spinnerTick()
 		}
 		return m, nil
 
@@ -215,11 +217,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state.FormError = ""
 				m.state.Cursor = 0
 			case "game", "waiting":
-				// Return to menu without clearing player data or lifetime stats
 				m.state.Screen = "menu"
 				m.state.Phase = "pick"
 				m.state.Cursor = 0
 				m.state.FormError = ""
+
+			case "create-room", "quick-match":
+				m.state.Screen = "multi-menu"
+				m.state.Cursor = 0
+				m.state.RoomCode = ""
+
+			case "multi-menu":
+				m.state.Screen = "menu"
+				m.state.Cursor = 1
 			case "result":
 				// Return to menu and reset match score for the next game
 				m.state.Screen = "menu"
@@ -399,10 +409,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state.Score = models.MatchScore{Round: 1}
 				case 1:
 					m.state.PreviousScreen = "menu"
-					m.state.Screen = "waiting"
+					m.state.Screen = "multi-menu"
 					m.state.GameMode = "multi"
+					m.state.Cursor = 0
 				case 2:
 					return m, tea.Quit
+				}
+
+			case "multi-menu":
+				switch m.state.Cursor {
+				case 0:
+					// Create Room — generate code and start spinner
+					m.state.Screen = "create-room"
+					m.state.RoomCode = models.GenerateRoomCode()
+					m.state.PreviousScreen = "multi-menu"
+					m.state.Cursor = 0
+					return m, spinnerTick()
+				case 1:
+					// Quick Match — auto search and start spinner
+					m.state.Screen = "quick-match"
+					m.state.PreviousScreen = "multi-menu"
+					m.state.Cursor = 0
+					return m, spinnerTick()
+				case 2:
+					// Back to main menu
+					m.state.Screen = "menu"
+					m.state.Cursor = 1
 				}
 
 			// ── Game screen — confirm move or continue after result ──
@@ -464,7 +496,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // isMenuScreen returns true for any screen that uses vertical cursor navigation
 func isMenuScreen(screen string) bool {
-	return screen == "welcome" || screen == "menu"
+	return screen == "welcome" || screen == "menu" || screen == "multi-menu"
 }
 
 // menuLength returns the number of selectable options for a given menu screen
@@ -473,7 +505,9 @@ func menuLength(screen string) int {
 	case "welcome":
 		return 3 // Register, Sign In, Quit
 	case "menu":
-		return 3 // Single Player, Multiplayer, Quit
+		return 3 // Single Player
+	case "multi-menu":	// Multiplayer, Quit
+		return 3
 	default:
 		return 0
 	}
@@ -509,8 +543,14 @@ func (m model) View() string {
 		return renderMenu(m)
 	case "game":
 		return renderGame(m)
+	case "multi-menu":
+		return renderMultiMenu(m)
+	case "create-room":
+		return renderCreateRoom(m)
+	case "quick-match":
+		return renderQuickMatch(m)
 	case "waiting":
-		return "\n  Waiting for opponent...\n\n  Esc to return to menu · ctrl+c to quit"
+		return renderQuickMatch(m) // fallback — reuses quick match screen
 	default:
 		return "\n  Unknown screen\n\n  ctrl+c to quit"
 	}
@@ -898,6 +938,58 @@ func padCenter(s string, width int) string {
 	left := total / 2
 	right := total - left
 	return strings.Repeat(" ", left) + s + strings.Repeat(" ", right)
+}
+
+// renderMultiMenu draws the multiplayer mode selection screen
+func renderMultiMenu(m model) string {
+    options := []string{
+        "Create Room  — get a code to share",
+        "Quick Match  — find any opponent",
+        "Back",
+    }
+    s := "\n  MULTIPLAYER\n\n"
+    s += "  Choose how you want to play:\n\n"
+    for i, opt := range options {
+        cursor := "  "
+        if m.state.Cursor == i {
+            cursor = "> "
+        }
+        s += "  " + cursor + opt + "\n"
+    }
+    s += "\n  ↑/↓ to move · Enter to select · Esc for menu"
+    return s
+}
+
+// renderCreateRoom draws the room code waiting screen
+func renderCreateRoom(m model) string {
+    spinner := spinnerFrames[m.state.SpinnerFrame]
+    s := "\n  CREATE ROOM\n\n"
+    s += "  ╔══════════════════════════════╗\n"
+    s += "  ║                              ║\n"
+    s += "  ║   Your room code:            ║\n"
+    s += "  ║                              ║\n"
+    s += "  ║      " + m.state.RoomCode + "              ║\n"
+    s += "  ║                              ║\n"
+    s += "  ╚══════════════════════════════╝\n"
+    s += "\n  Share this code with your opponent.\n"
+    s += "\n  " + spinner + "  Waiting for opponent to join...\n"
+    s += "\n  Esc to cancel · ctrl+c to quit"
+    return s
+}
+
+// renderQuickMatch draws the auto matchmaking waiting screen
+func renderQuickMatch(m model) string {
+    spinner := spinnerFrames[m.state.SpinnerFrame]
+    s := "\n  QUICK MATCH\n\n"
+    s += "  " + spinner + "  Searching for an opponent...\n\n"
+    s += "  ╔══════════════════════════════╗\n"
+    s += "  ║                              ║\n"
+    s += "  ║   This may take a moment.    ║\n"
+    s += "  ║   Stay in the terminal!      ║\n"
+    s += "  ║                              ║\n"
+    s += "  ╚══════════════════════════════╝\n"
+    s += "\n  Esc to cancel · ctrl+c to quit"
+    return s
 }
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────

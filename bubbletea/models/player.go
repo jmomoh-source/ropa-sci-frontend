@@ -50,6 +50,7 @@ type GameState struct {
 	Score    MatchScore
 	Screen   string // Screens: "welcome", "register", "login", "menu", "game", "result", "waiting"
 	GameMode string // handles for "single" & "multi"
+	RoomCode string // generated room code for Create Room mode
 
 	Phase        GamePhase  // current game phase
     PlayerMove   Move // what the player picked
